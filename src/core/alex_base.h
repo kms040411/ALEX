@@ -119,9 +119,11 @@ class AlexKey {
 
   AlexKey<T>& operator=(const AlexKey<T>& other) {
     if (this != &other) {
-      delete[] key_arr_;
+      if ((key_arr_ == nullptr) || (max_key_length_ != other.max_key_length_)) {
+        delete[] key_arr_;
+        key_arr_ = new T[other.max_key_length_];
+      }
       max_key_length_ = other.max_key_length_;
-      key_arr_ = new T[other.max_key_length_];
       std::copy(other.key_arr_, other.key_arr_ + other.max_key_length_, key_arr_);
     }
     return *this;
@@ -386,6 +388,7 @@ class LinearModelBuilder {
 
       free(A);
       free(b);
+      mkl_free_buffers();
 
 #if DEBUG_PRINT
       //for debugging
@@ -1005,14 +1008,16 @@ void rcu_progress(const uint32_t worker_id) {
   config.rcu_status[worker_id].status++;
 }
 
-// wait for all workers
+// wait for all workers whose 'waiting' is false
 void rcu_barrier() {
   uint64_t prev_status[config.worker_n];
   for (size_t w_i = 0; w_i < config.worker_n; w_i++) {
     prev_status[w_i] = config.rcu_status[w_i].status;
   }
   for (size_t w_i = 0; w_i < config.worker_n; w_i++) {
-    while (config.rcu_status[w_i].status <= prev_status[w_i] && !config.exited)
+    while (!config.rcu_status[w_i].waiting
+           && config.rcu_status[w_i].status <= prev_status[w_i]
+           && !config.exited)
       ;
   }
 }
@@ -1033,8 +1038,9 @@ void rcu_barrier(const uint32_t worker_id) {
   }
   for (size_t w_i = 0; w_i < config.worker_n; w_i++) {
     // skipped workers that is wating for barrier (include myself)
-    while (config.rcu_status[w_i].status <= prev_status[w_i] &&
-           !config.rcu_status[w_i].waiting && !config.exited)
+    while ( !config.rcu_status[w_i].waiting &&
+            config.rcu_status[w_i].status <= prev_status[w_i] &&
+            !config.exited)
       ;
   }
   config.rcu_status[worker_id].waiting = false;  // restore my state
